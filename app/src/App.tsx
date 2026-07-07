@@ -1,15 +1,15 @@
 import { Routes, Route } from "react-router";
 import { ProtectedRoute, PublicRoute } from "@/components/RouteGuard";
-import Login from "@/pages/Login";
-import Register from "@/pages/Register";
-import ForgotPassword from "@/pages/ForgotPassword";
-import Dashboard from "@/pages/Dashboard";
-import Trades from "@/pages/Trades";
+import Login from "@/pages/login";
+import Register from "@/pages/register";
+import ForgotPassword from "@/pages/forgot-password";
+import Dashboard from "@/pages/dashboard";
+import Trades from "@/pages/trades";
 import AddTrade from "@/pages/AddTrade";
 import TradeDetail from "@/pages/TradeDetail";
-import Journal from "@/pages/Journal";
-import Analytics from "@/pages/Analytics";
-import Settings from "@/pages/Settings";
+import Journal from "@/pages/journal";
+import Analytics from "@/pages/analytics";
+import Settings from "@/pages/settings";
 
 export default function App() {
   return (
