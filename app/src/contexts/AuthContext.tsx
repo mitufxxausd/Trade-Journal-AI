@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import { auth, onAuthStateChanged, signOut as firebaseSignOut, type FirebaseUser } from "@/lib/firebase";
-import { doc, getDoc, setDoc, db } from "@/lib/firestore";
+import { auth, onAuthStateChanged, signOut as firebaseSignOut, type FirebaseUser, db } from "@/lib/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export interface UserProfile {
   uid: string;
