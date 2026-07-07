@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getTrade, deleteTrade, toggleFavorite, togglePin } from "@/services/tradeService";
+import { useTrade } from "@/hooks/use-trade";
+import { useAuth } from "@/contexts/AuthContext";
+import { deleteTrade, toggleFavorite, togglePin } from "@/lib/firestore";
 import type { Trade } from "@/types/trade";
 import { toast } from "sonner";
 import {
@@ -22,22 +24,14 @@ import {
 export default function TradeDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [trade, setTrade] = useState<Trade | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const { trade, loading } = useTrade(user?.uid, id);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!id) return;
-    getTrade(id).then((data) => {
-      setTrade(data);
-      setLoading(false);
-    });
-  }, [id]);
-
   const handleDelete = async () => {
-    if (!id) return;
+    if (!id || !user?.uid) return;
     try {
-      await deleteTrade(id);
+      await deleteTrade(user.uid, id);
       toast.success("Trade deleted");
       navigate("/trades");
     } catch {
@@ -46,10 +40,9 @@ export default function TradeDetail() {
   };
 
   const handleFavorite = async () => {
-    if (!trade) return;
+    if (!trade || !user?.uid) return;
     try {
-      await toggleFavorite(trade.id, trade.isFavorite);
-      setTrade({ ...trade, isFavorite: !trade.isFavorite });
+      await toggleFavorite(user.uid, trade.id, trade.isFavorite);
       toast.success(trade.isFavorite ? "Removed from favorites" : "Added to favorites");
     } catch {
       toast.error("Failed to update");
@@ -57,10 +50,9 @@ export default function TradeDetail() {
   };
 
   const handlePin = async () => {
-    if (!trade) return;
+    if (!trade || !user?.uid) return;
     try {
-      await togglePin(trade.id, trade.isPinned);
-      setTrade({ ...trade, isPinned: !trade.isPinned });
+      await togglePin(user.uid, trade.id, trade.isPinned);
       toast.success(trade.isPinned ? "Unpinned" : "Pinned");
     } catch {
       toast.error("Failed to update");
@@ -89,22 +81,9 @@ export default function TradeDetail() {
     );
   }
 
-  const isWin = (trade.profitLoss || 0) > 0;
-  const isLoss = (trade.profitLoss || 0) < 0;
-
-  const renderNotes = (text: string) => {
-    if (!text) return <p className="text-muted-foreground italic">No notes added</p>;
-    return (
-      <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
-        {text}
-      </div>
-    );
-  };
-
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate("/trades")}>
@@ -118,7 +97,7 @@ export default function TradeDetail() {
                 {trade.isFavorite && <Star className="h-4 w-4 fill-amber-400 text-amber-400" />}
                 {trade.isPinned && <Pin className="h-4 w-4 text-primary" />}
               </div>
-              <p className="text-sm text-muted-foreground">{trade.strategy} • {trade.setupName} • {trade.timeframe}</p>
+              <p className="text-sm text-muted-foreground">{trade.strategy} &bull; {trade.setupName} &bull; {trade.timeframe}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -138,7 +117,7 @@ export default function TradeDetail() {
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete Trade</AlertDialogTitle>
-                  <AlertDialogDescription>Are you sure? This action cannot be undone.</AlertDialogDescription>
+                  <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -149,27 +128,7 @@ export default function TradeDetail() {
           </div>
         </div>
 
-        {/* P&L Summary */}
-        <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 rounded-xl ${isWin ? "bg-green-50 dark:bg-green-950/20" : isLoss ? "bg-red-50 dark:bg-red-950/20" : "bg-muted"}`}>
-          <div>
-            <p className="text-sm text-muted-foreground">Profit / Loss</p>
-            <p className={`text-3xl font-bold ${isWin ? "text-green-600" : isLoss ? "text-red-600" : ""}`}>
-              {isWin ? "+" : ""}${(trade.profitLoss || 0).toFixed(2)}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">R:R Ratio</p>
-            <p className="text-2xl font-semibold">{trade.rrRatio?.toFixed(2) || "-"}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Position Size</p>
-            <p className="text-2xl font-semibold">{trade.positionSize.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Risk %</p>
-            <p className="text-2xl font-semibold">{trade.riskPercent ? `${trade.riskPercent}%` : "-"}</p>
-          </div>
-        </div>
+        <TradeSummary trade={trade} />
 
         <Tabs defaultValue="details" className="space-y-4">
           <TabsList className="flex flex-wrap h-auto">
@@ -333,7 +292,6 @@ export default function TradeDetail() {
         </Tabs>
       </div>
 
-      {/* Full screen image viewer */}
       {selectedImage && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
           <img src={selectedImage} alt="Screenshot" className="max-w-full max-h-full object-contain rounded-lg" />
@@ -343,6 +301,43 @@ export default function TradeDetail() {
         </div>
       )}
     </AppLayout>
+  );
+}
+
+function TradeSummary({ trade }: { trade: Trade }) {
+  const isWin = (trade.profitLoss || 0) > 0;
+  const isLoss = (trade.profitLoss || 0) < 0;
+
+  return (
+    <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 rounded-xl ${isWin ? "bg-green-50 dark:bg-green-950/20" : isLoss ? "bg-red-50 dark:bg-red-950/20" : "bg-muted"}`}>
+      <div>
+        <p className="text-sm text-muted-foreground">Profit / Loss</p>
+        <p className={`text-3xl font-bold ${isWin ? "text-green-600" : isLoss ? "text-red-600" : ""}`}>
+          {isWin ? "+" : ""}${(trade.profitLoss || 0).toFixed(2)}
+        </p>
+      </div>
+      <div>
+        <p className="text-sm text-muted-foreground">R:R Ratio</p>
+        <p className="text-2xl font-semibold">{trade.rrRatio?.toFixed(2) || "-"}</p>
+      </div>
+      <div>
+        <p className="text-sm text-muted-foreground">Position Size</p>
+        <p className="text-2xl font-semibold">{trade.positionSize.toLocaleString()}</p>
+      </div>
+      <div>
+        <p className="text-sm text-muted-foreground">Risk %</p>
+        <p className="text-2xl font-semibold">{trade.riskPercent ? `${trade.riskPercent}%` : "-"}</p>
+      </div>
+    </div>
+  );
+}
+
+function renderNotes(text: string) {
+  if (!text) return <p className="text-muted-foreground italic">No notes added</p>;
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
+      {text}
+    </div>
   );
 }
 

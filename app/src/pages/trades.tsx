@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,14 @@ import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { db, query, collection, where, orderBy, getDocs, auth } from "@/lib/firebase";
-import { deleteTrade, toggleFavorite, toggleArchive, duplicateTrade } from "@/services/tradeService";
+import { useTrades } from "@/hooks/use-trades";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  toggleFavorite,
+  toggleArchive,
+  duplicateTrade,
+  deleteTrade,
+} from "@/lib/firestore";
 import type { Trade, TradeSort, Market, Direction } from "@/types/trade";
 import { toast } from "sonner";
 import {
@@ -20,12 +26,12 @@ import {
   ArrowUpRight, ArrowDownRight, TrendingUp, Filter, X,
 } from "lucide-react";
 
-type StatusFilter = "all" | "open" | "closed" | "breakeven";
+type StatusFilter = "all" | "open" | "closed" | "breakeven" | "win" | "loss";
 
 export default function Trades() {
   const navigate = useNavigate();
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<TradeSort>({ field: "tradeDate", direction: "desc" });
   const [marketFilter, setMarketFilter] = useState<Market | "all">("all");
@@ -33,50 +39,29 @@ export default function Trades() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showFilters, setShowFilters] = useState(false);
 
-  const fetchTrades = useCallback(async () => {
-    try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) return;
-      const constraints = [where("userId", "==", currentUser.uid), orderBy(sort.field, sort.direction)];
-      const q = query(collection(db, "trades"), ...constraints);
-      const snapshot = await getDocs(q);
-      let data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Trade));
-      setTrades(data);
-    } catch {
-      // Handle silently
-    } finally {
-      setLoading(false);
-    }
-  }, [sort]);
+  const filters = useMemo(
+    () => ({
+      search: search || undefined,
+      market: marketFilter !== "all" ? marketFilter : undefined,
+      direction: directionFilter !== "all" ? directionFilter : undefined,
+      status: statusFilter !== "all" ? statusFilter : undefined,
+    }),
+    [search, marketFilter, directionFilter, statusFilter]
+  );
 
-  useEffect(() => {
-    fetchTrades();
-  }, [fetchTrades]);
+  const { trades, loading, refresh } = useTrades({
+    userId: user?.uid,
+    filters,
+    sort,
+  });
 
-  const filteredTrades = useMemo(() => {
-    let filtered = [...trades];
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      filtered = filtered.filter((t) =>
-        t.pair.toLowerCase().includes(s) ||
-        t.strategy.toLowerCase().includes(s) ||
-        t.broker.toLowerCase().includes(s) ||
-        t.notes.toLowerCase().includes(s) ||
-        t.tags.some((tag) => tag.toLowerCase().includes(s))
-      );
-    }
-    if (marketFilter !== "all") filtered = filtered.filter((t) => t.market === marketFilter);
-    if (directionFilter !== "all") filtered = filtered.filter((t) => t.direction === directionFilter);
-    if (statusFilter !== "all") filtered = filtered.filter((t) => t.status === statusFilter);
-    return filtered;
-  }, [trades, search, marketFilter, directionFilter, statusFilter]);
-
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (trade: Trade) => {
     if (!confirm("Are you sure you want to delete this trade?")) return;
+    if (!user?.uid) return;
     try {
-      await deleteTrade(id);
-      setTrades(trades.filter((t) => t.id !== id));
+      await deleteTrade(user.uid, trade.id);
       toast.success("Trade deleted");
+      refresh();
     } catch (error: unknown) {
       const err = error as { message?: string };
       toast.error(err.message || "Failed to delete");
@@ -84,30 +69,33 @@ export default function Trades() {
   };
 
   const handleFavorite = async (trade: Trade) => {
+    if (!user?.uid) return;
     try {
-      await toggleFavorite(trade.id, trade.isFavorite);
-      setTrades(trades.map((t) => t.id === trade.id ? { ...t, isFavorite: !t.isFavorite } : t));
+      await toggleFavorite(user.uid, trade.id, trade.isFavorite);
       toast.success(trade.isFavorite ? "Removed from favorites" : "Added to favorites");
+      refresh();
     } catch {
       toast.error("Failed to update");
     }
   };
 
   const handleArchive = async (trade: Trade) => {
+    if (!user?.uid) return;
     try {
-      await toggleArchive(trade.id, trade.isArchived);
-      setTrades(trades.map((t) => t.id === trade.id ? { ...t, isArchived: !t.isArchived } : t));
+      await toggleArchive(user.uid, trade.id, trade.isArchived);
       toast.success(trade.isArchived ? "Unarchived" : "Archived");
+      refresh();
     } catch {
       toast.error("Failed to update");
     }
   };
 
   const handleDuplicate = async (trade: Trade) => {
+    if (!user?.uid) return;
     try {
-      await duplicateTrade(trade);
+      await duplicateTrade(user.uid, trade.id);
       toast.success("Trade duplicated");
-      fetchTrades();
+      refresh();
     } catch {
       toast.error("Failed to duplicate");
     }
@@ -128,14 +116,13 @@ export default function Trades() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Trades</h1>
-            <p className="text-muted-foreground">{filteredTrades.length} trades</p>
+            <p className="text-muted-foreground">{trades.length} trades</p>
           </div>
           <Button onClick={() => navigate("/trades/new")}>
             <Plus className="mr-2 h-4 w-4" />Add Trade
           </Button>
         </div>
 
-        {/* Search and Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -190,6 +177,8 @@ export default function Trades() {
                       <SelectItem value="open">Open</SelectItem>
                       <SelectItem value="closed">Closed</SelectItem>
                       <SelectItem value="breakeven">Breakeven</SelectItem>
+                      <SelectItem value="win">Win</SelectItem>
+                      <SelectItem value="loss">Loss</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -203,7 +192,6 @@ export default function Trades() {
           </Card>
         )}
 
-        {/* Sort bar */}
         <div className="flex flex-wrap gap-2">
           {([
             { field: "tradeDate" as const, label: "Date" },
@@ -216,14 +204,13 @@ export default function Trades() {
           ))}
         </div>
 
-        {/* Trades List */}
         {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <Card key={i}><CardContent className="p-4"><Skeleton className="h-12" /></CardContent></Card>
             ))}
           </div>
-        ) : filteredTrades.length === 0 ? (
+        ) : trades.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
               <TrendingUp className="h-12 w-12 text-muted-foreground mb-4" />
@@ -236,18 +223,16 @@ export default function Trades() {
           </Card>
         ) : (
           <div className="space-y-2">
-            {filteredTrades.map((trade) => (
+            {trades.map((trade) => (
               <Card key={trade.id} className={`hover:shadow-md transition-all cursor-pointer ${trade.isPinned ? "border-primary" : ""} ${trade.isArchived ? "opacity-60" : ""}`}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
-                    {/* P&L indicator */}
                     <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
                       (trade.profitLoss || 0) > 0 ? "bg-green-100 text-green-600" : (trade.profitLoss || 0) < 0 ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-600"
                     }`}>
                       {(trade.profitLoss || 0) > 0 ? <ArrowUpRight className="h-5 w-5" /> : (trade.profitLoss || 0) < 0 ? <ArrowDownRight className="h-5 w-5" /> : <span className="text-sm">=</span>}
                     </div>
 
-                    {/* Trade info */}
                     <div className="flex-1 min-w-0" onClick={() => navigate(`/trades/${trade.id}`)}>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold">{trade.pair}</span>
@@ -258,11 +243,11 @@ export default function Trades() {
                       </div>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1 flex-wrap">
                         <span>{trade.strategy}</span>
-                        <span>•</span>
+                        <span>&bull;</span>
                         <span>{trade.timeframe}</span>
-                        <span>•</span>
+                        <span>&bull;</span>
                         <span>{trade.tradeDate}</span>
-                        {trade.broker && <><span>•</span><span>{trade.broker}</span></>}
+                        {trade.broker && <><span>&bull;</span><span>{trade.broker}</span></>}
                       </div>
                       {trade.tags.length > 0 && (
                         <div className="flex gap-1 mt-1 flex-wrap">
@@ -274,7 +259,6 @@ export default function Trades() {
                       )}
                     </div>
 
-                    {/* P&L amount */}
                     <div className="text-right shrink-0" onClick={() => navigate(`/trades/${trade.id}`)}>
                       <p className={`font-semibold ${(trade.profitLoss || 0) > 0 ? "text-green-600" : (trade.profitLoss || 0) < 0 ? "text-red-600" : ""}`}>
                         {trade.profitLoss && trade.profitLoss > 0 ? "+" : ""}${(trade.profitLoss || 0).toFixed(2)}
@@ -282,7 +266,6 @@ export default function Trades() {
                       {trade.rrRatio && <p className="text-xs text-muted-foreground">R:R {trade.rrRatio.toFixed(1)}</p>}
                     </div>
 
-                    {/* Actions */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
@@ -297,7 +280,7 @@ export default function Trades() {
                         <DropdownMenuItem onClick={() => handleDuplicate(trade)}><Copy className="mr-2 h-4 w-4" /> Duplicate</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleArchive(trade)}><Archive className="mr-2 h-4 w-4" /> {trade.isArchived ? "Unarchive" : "Archive"}</DropdownMenuItem>
                         <Separator />
-                        <DropdownMenuItem onClick={() => handleDelete(trade.id)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleDelete(trade)} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
