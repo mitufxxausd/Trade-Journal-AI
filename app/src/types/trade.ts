@@ -1,7 +1,7 @@
 export type Market = "Forex" | "Crypto" | "Stocks" | "Futures" | "Options";
 export type Direction = "Buy" | "Sell";
 export type Session = "London" | "New York" | "Tokyo" | "Sydney" | "Asian" | "European" | "American" | "Other";
-export type TradeStatus = "open" | "closed" | "breakeven";
+export type TradeStatus = "open" | "closed" | "breakeven" | "win" | "loss";
 
 export interface TradePsychology {
   before: {
@@ -76,6 +76,41 @@ export interface Trade {
   updatedAt: string;
 }
 
+export interface TradeInput {
+  pair?: string;
+  market?: Market;
+  direction?: Direction;
+  broker?: string;
+  account?: string;
+  strategy?: string;
+  setupName?: string;
+  timeframe?: string;
+  entryPrice?: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  exitPrice?: number | null;
+  positionSize?: number;
+  riskPercent?: number | null;
+  rrRatio?: number | null;
+  commission?: number;
+  swap?: number;
+  profitLoss?: number | null;
+  currency?: string;
+  tradeDate?: string;
+  entryTime?: string;
+  exitTime?: string | null;
+  session?: Session;
+  status?: TradeStatus;
+  isFavorite?: boolean;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  tags?: string[];
+  psychology?: TradePsychology;
+  checklist?: TradeChecklistItem[];
+  screenshots?: TradeScreenshot[];
+  notes?: string;
+}
+
 export interface TradeFilters {
   search: string;
   dateRange: { from: string | null; to: string | null };
@@ -90,6 +125,7 @@ export interface TradeFilters {
   maxProfit: number | null;
   minRisk: number | null;
   maxRisk: number | null;
+  archived: boolean | null;
 }
 
 export type SortField = "tradeDate" | "profit" | "rr" | "createdAt";
@@ -135,4 +171,16 @@ export interface StrategyPerformance {
   winRate: number;
   profit: number;
   avgRr: number;
+}
+
+export interface UserSettings {
+  defaultCurrency?: string;
+  defaultMarket?: Market;
+  defaultSession?: Session;
+  defaultTags?: string[];
+  defaultChecklist?: TradeChecklistItem[];
+  defaultBroker?: string;
+  defaultAccount?: string;
+  riskPerTrade?: number;
+  theme?: "light" | "dark" | "system";
 }
