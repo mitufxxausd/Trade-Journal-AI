@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react"
 import { getTrade, subscribeToTrades } from "@/lib/firestore"
-import type { Trade } from "@/types"
+import type { Trade } from "@/types/trade"
 
 export function useTrade(userId: string | undefined, tradeId: string | undefined) {
   const [trade, setTrade] = useState<Trade | null>(null)
@@ -31,7 +31,6 @@ export function useTrade(userId: string | undefined, tradeId: string | undefined
     setLoading(true)
     let cancelled = false
 
-    // Initial fetch then realtime updates for this trade only
     const unsubscribe = subscribeToTrades(userId, (items) => {
       if (cancelled) return
       const item = items.find((t) => t.id === tradeId)
