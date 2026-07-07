@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTrade, deleteTrade, toggleFavorite, togglePin } from "@/services/tradeService";
+import { getThumbnailUrl, getFullSizeUrl } from "@/services/cloudinaryService";
 import type { Trade } from "@/types/trade";
 import { toast } from "sonner";
 import {
@@ -244,7 +245,13 @@ export default function TradeDetail() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                     {trade.screenshots.map((s) => (
                       <div key={s.id} className="group relative rounded-lg border overflow-hidden cursor-pointer" onClick={() => setSelectedImage(s.url)}>
-                        <img src={s.url} alt={s.name} className="w-full h-40 object-cover" />
+                        {/* Responsive thumbnail with lazy loading */}
+                        <img
+                          src={getThumbnailUrl(s.url)}
+                          alt={s.name}
+                          loading="lazy"
+                          className="w-full h-40 object-cover"
+                        />
                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                           <ExternalLink className="h-6 w-6 text-white" />
                         </div>
@@ -333,10 +340,14 @@ export default function TradeDetail() {
         </Tabs>
       </div>
 
-      {/* Full screen image viewer */}
+      {/* Full screen image viewer with full-size responsive image */}
       {selectedImage && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
-          <img src={selectedImage} alt="Screenshot" className="max-w-full max-h-full object-contain rounded-lg" />
+          <img
+            src={getFullSizeUrl(selectedImage)}
+            alt="Screenshot"
+            className="max-w-full max-h-full object-contain rounded-lg"
+          />
           <Button variant="ghost" size="icon" className="absolute top-4 right-4 text-white" onClick={() => setSelectedImage(null)}>
             <X className="h-6 w-6" />
           </Button>
