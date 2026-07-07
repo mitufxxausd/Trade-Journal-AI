@@ -12,9 +12,19 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { createTrade, updateTrade, getTrade } from "@/services/tradeService";
-import { storage, auth, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
+import {
+  uploadScreenshot,
+  deleteScreenshot as deleteCloudinaryScreenshot,
+  validateImageFile,
+  getThumbnailUrl,
+} from "@/services/cloudinaryService";
+import type { UploadProgressEvent } from "@/services/cloudinaryService";
 import { toast } from "sonner";
-import { Loader2, Plus, X, Upload, Trash2, Star, Image as ImageIcon, GripVertical } from "lucide-react";
+import {
+  Loader2, Plus, X, Upload, Trash2, Star, Image as ImageIcon,
+  GripVertical, RefreshCw, Move,
+} from "lucide-react";
 import type { Trade, Market, Direction, Session, TradePsychology, TradeChecklistItem, TradeScreenshot } from "@/types/trade";
 import { useEffect } from "react";
 
@@ -40,9 +50,12 @@ export default function AddTrade() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Form state
   const [pair, setPair] = useState("");
@@ -147,6 +160,8 @@ export default function AddTrade() {
     setChecklist(checklist.filter((item) => item.id !== id));
   };
 
+  // ── Screenshot Upload ──────────────────────────────────────────
+
   const handleFileDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
@@ -156,46 +171,190 @@ export default function AddTrade() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
     handleUploadFiles(files);
+    // Reset input so same file can be selected again
+    e.target.value = "";
   };
 
-  const handleUploadFiles = (files: File[]) => {
+  const handleUploadFiles = async (files: File[]) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      toast.error("You must be logged in to upload images");
+      return;
+    }
+
+    const tradeIdOrTemp = isEditing && id ? id : "temp";
+
     for (const file of files) {
-      const uploadId = Date.now().toString() + Math.random().toString(36).slice(2);
+      // Validate before upload
+      const validation = validateImageFile(file);
+      if (!validation.valid) {
+        toast.error(validation.error);
+        continue;
+      }
+
+      const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       setUploadProgress((prev) => ({ ...prev, [uploadId]: 0 }));
 
-      const storageRef = ref(storage, `trades/${auth.currentUser?.uid}/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, file);
+      try {
+        const screenshot = await uploadScreenshot(
+          currentUser.uid,
+          tradeIdOrTemp,
+          file,
+          (event: UploadProgressEvent) => {
+            setUploadProgress((prev) => ({ ...prev, [event.screenshotId]: event.progress }));
+          },
+          uploadId
+        );
 
-      uploadTask.on(
-        "state_changed",
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress((prev) => ({ ...prev, [uploadId]: progress }));
-        },
-        (error) => {
-          console.error("Upload error:", error);
-          toast.error(`Failed to upload ${file.name}`);
-          setUploadProgress((prev) => { const n = { ...prev }; delete n[uploadId]; return n; });
-        },
-        async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          setScreenshots((prev) => [...prev, { id: uploadId, url, name: file.name, uploadedAt: new Date().toISOString() }]);
-          setUploadProgress((prev) => { const n = { ...prev }; delete n[uploadId]; return n; });
-          toast.success(`${file.name} uploaded`);
-        }
-      );
+        setScreenshots((prev) => [...prev, screenshot]);
+        toast.success(`${file.name} uploaded successfully`);
+      } catch (error: unknown) {
+        const err = error as { message?: string };
+        toast.error(err.message || `Failed to upload ${file.name}`);
+        console.error("Upload error:", error);
+      } finally {
+        setUploadProgress((prev) => {
+          const next = { ...prev };
+          delete next[uploadId];
+          return next;
+        });
+      }
     }
   };
+
+  // ── Screenshot Delete ──────────────────────────────────────────
 
   const handleDeleteScreenshot = async (screenshot: TradeScreenshot) => {
     try {
-      const storageRef = ref(storage, screenshot.url);
-      await deleteObject(storageRef);
+      // Attempt to delete from Cloudinary (best effort)
+      const urlParts = screenshot.url.split("/");
+      const uploadIndex = urlParts.indexOf("upload");
+      if (uploadIndex !== -1 && uploadIndex + 2 < urlParts.length) {
+        const publicIdWithVersion = urlParts.slice(uploadIndex + 2).join("/").replace(/\.[^/.]+$/, "");
+        if (publicIdWithVersion) {
+          await deleteCloudinaryScreenshot(publicIdWithVersion);
+        }
+      }
     } catch {
-      // URL might be invalid for deletion, just remove from state
+      // Silently fail — the image reference will be removed from Firestore anyway
     }
-    setScreenshots(screenshots.filter((s) => s.id !== screenshot.id));
+    setScreenshots((prev) => prev.filter((s) => s.id !== screenshot.id));
     toast.success("Screenshot removed");
+  };
+
+  // ── Screenshot Replace ─────────────────────────────────────────
+
+  const handleReplaceClick = (index: number) => {
+    setReplaceIndex(index);
+    replaceInputRef.current?.click();
+  };
+
+  const handleReplaceFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || replaceIndex === null) {
+      setReplaceIndex(null);
+      e.target.value = "";
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      toast.error("You must be logged in to upload images");
+      setReplaceIndex(null);
+      e.target.value = "";
+      return;
+    }
+
+    // Validate
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      toast.error(validation.error);
+      setReplaceIndex(null);
+      e.target.value = "";
+      return;
+    }
+
+    const tradeIdOrTemp = isEditing && id ? id : "temp";
+    const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    setUploadProgress((prev) => ({ ...prev, [uploadId]: 0 }));
+
+    try {
+      // Delete old image first (best effort)
+      const oldScreenshot = screenshots[replaceIndex];
+      if (oldScreenshot) {
+        const urlParts = oldScreenshot.url.split("/");
+        const uploadIdx = urlParts.indexOf("upload");
+        if (uploadIdx !== -1 && uploadIdx + 2 < urlParts.length) {
+          const publicId = urlParts.slice(uploadIdx + 2).join("/").replace(/\.[^/.]+$/, "");
+          if (publicId) await deleteCloudinaryScreenshot(publicId);
+        }
+      }
+
+      const screenshot = await uploadScreenshot(
+        currentUser.uid,
+        tradeIdOrTemp,
+        file,
+        (event: UploadProgressEvent) => {
+          setUploadProgress((prev) => ({ ...prev, [event.screenshotId]: event.progress }));
+        },
+        uploadId
+      );
+
+      setScreenshots((prev) => {
+        const next = [...prev];
+        next[replaceIndex] = screenshot;
+        return next;
+      });
+      toast.success(`${file.name} replaced successfully`);
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      toast.error(err.message || `Failed to replace image`);
+    } finally {
+      setUploadProgress((prev) => {
+        const next = { ...prev };
+        delete next[uploadId];
+        return next;
+      });
+      setReplaceIndex(null);
+      e.target.value = "";
+    }
+  };
+
+  // ── Screenshot Reorder ─────────────────────────────────────────
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+    // Add a slight delay so the drag image doesn't include the hover overlay
+    setTimeout(() => setDragOverIndex(index), 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    const dragIndex = Number(e.dataTransfer.getData("text/plain"));
+    if (isNaN(dragIndex) || dragIndex === dropIndex) {
+      setDragOverIndex(null);
+      return;
+    }
+
+    setScreenshots((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(dropIndex, 0, moved);
+      return next;
+    });
+    setDragOverIndex(null);
+    toast.success("Image reordered");
   };
 
   const calculateAutoPl = () => {
@@ -581,9 +740,10 @@ export default function AddTrade() {
             <Card>
               <CardHeader>
                 <CardTitle>Trade Screenshots</CardTitle>
-                <CardDescription>Upload chart screenshots for this trade</CardDescription>
+                <CardDescription>Upload, reorder, and manage chart screenshots for this trade</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Drag & Drop zone */}
                 <div
                   className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
                   onClick={() => fileInputRef.current?.click()}
@@ -591,10 +751,19 @@ export default function AddTrade() {
                   onDragOver={(e) => e.preventDefault()}
                 >
                   <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm font-medium">Click or drag & drop to upload</p>
-                  <p className="text-xs text-muted-foreground">PNG, JPG, GIF up to 10MB</p>
+                  <p className="text-sm font-medium">Click or drag & drop to upload images</p>
+                  <p className="text-xs text-muted-foreground mt-1">PNG, JPG, WEBP, GIF up to 10MB</p>
                   <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
                 </div>
+
+                {/* Hidden replace input */}
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleReplaceFileSelect}
+                />
 
                 {/* Upload progress */}
                 {Object.entries(uploadProgress).map(([id, progress]) => (
@@ -605,18 +774,80 @@ export default function AddTrade() {
                   </div>
                 ))}
 
-                {/* Screenshots grid */}
+                {/* Screenshots grid with drag-to-reorder */}
                 {screenshots.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {screenshots.map((screenshot) => (
-                      <div key={screenshot.id} className="group relative rounded-lg border overflow-hidden">
-                        <img src={screenshot.url} alt={screenshot.name} className="w-full h-32 object-cover" />
-                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                          <Button variant="secondary" size="icon" className="h-8 w-8" onClick={() => window.open(screenshot.url, "_blank")}><ImageIcon className="h-4 w-4" /></Button>
-                          <Button variant="destructive" size="icon" className="h-8 w-8" onClick={() => handleDeleteScreenshot(screenshot)}><Trash2 className="h-4 w-4" /></Button>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Move className="h-3 w-3" />
+                      <span>Drag images to reorder them</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {screenshots.map((screenshot, index) => (
+                        <div
+                          key={screenshot.id}
+                          className={`group relative rounded-lg border overflow-hidden bg-muted/30 transition-all ${
+                            dragOverIndex === index ? "ring-2 ring-primary scale-[1.02]" : ""
+                          }`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, index)}
+                          onDragOver={(e) => handleDragOver(e, index)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, index)}
+                        >
+                          {/* Drag handle indicator */}
+                          <div className="absolute top-1 left-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="bg-black/60 rounded p-1">
+                              <GripVertical className="h-3 w-3 text-white" />
+                            </div>
+                          </div>
+
+                          {/* Image with lazy loading and responsive thumbnail */}
+                          <img
+                            src={getThumbnailUrl(screenshot.url)}
+                            alt={screenshot.name}
+                            loading="lazy"
+                            className="w-full h-32 object-cover"
+                            draggable={false}
+                          />
+
+                          {/* Hover overlay with actions */}
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => window.open(screenshot.url, "_blank")}
+                              title="View full size"
+                            >
+                              <ImageIcon className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleReplaceClick(index)}
+                              title="Replace image"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleDeleteScreenshot(screenshot)}
+                              title="Delete image"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+
+                          {/* File name tooltip at bottom */}
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p className="text-[10px] text-white truncate">{screenshot.name}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 )}
               </CardContent>
