@@ -7,26 +7,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
-  LayoutDashboard,
-  PlusCircle,
-  List,
-  BarChart3,
-  Settings,
-  LogOut,
-  Menu,
-  TrendingUp,
-  Sun,
-  Moon,
-  BookOpen,
+  LayoutDashboard, PlusCircle, List, BarChart3, Settings, LogOut, Menu,
+  TrendingUp, Sun, Moon, BookOpen,
 } from "lucide-react";
 
 const navItems = [
@@ -57,12 +44,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const getInitials = (name: string | null | undefined): string => {
     if (!name) return "U";
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
+    return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   };
 
   const sidebarContent = (
@@ -79,18 +61,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                  isActive
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
+              <Link key={item.path} to={item.path} onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+                <item.icon className="h-4 w-4" />{item.label}
               </Link>
             );
           })}
@@ -105,33 +78,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">
-              {userProfile?.displayName || user?.displayName || "User"}
-            </p>
+            <p className="text-sm font-medium truncate">{userProfile?.displayName || user?.displayName || "User"}</p>
             <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Settings className="h-4 w-4" />
-              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8"><Settings className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-                {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                Toggle Theme
+                {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}Toggle Theme
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/settings")}>
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/settings")}><Settings className="mr-2 h-4 w-4" />Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="text-destructive">
-                <LogOut className="mr-2 h-4 w-4" />
-                Logout
-              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleLogout} className="text-destructive"><LogOut className="mr-2 h-4 w-4" />Logout</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -141,32 +103,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex w-64 flex-col border-r bg-card">
-        {sidebarContent}
-      </aside>
-
-      {/* Mobile Sidebar */}
+      <aside className="hidden lg:flex w-64 flex-col border-r bg-card">{sidebarContent}</aside>
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden fixed top-4 left-4 z-50 h-10 w-10"
-          >
-            <Menu className="h-5 w-5" />
-          </Button>
+          <Button variant="ghost" size="icon" className="lg:hidden fixed top-4 left-4 z-50 h-10 w-10"><Menu className="h-5 w-5" /></Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-64 p-0">
-          {sidebarContent}
-        </SheetContent>
+        <SheetContent side="left" className="w-64 p-0">{sidebarContent}</SheetContent>
       </Sheet>
-
-      {/* Main Content */}
       <main className="flex-1 overflow-auto">
-        <div className="lg:hidden h-16 border-b flex items-center px-4 pl-16">
-          <span className="font-bold">TradeJournal AI</span>
-        </div>
+        <div className="lg:hidden h-16 border-b flex items-center px-4 pl-16"><span className="font-bold">TradeJournal AI</span></div>
         <div className="p-4 lg:p-8">{children}</div>
       </main>
     </div>

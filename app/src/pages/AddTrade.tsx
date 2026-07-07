@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { createTrade, updateTrade, getTrade } from "@/services/tradeService";
-import { storage, auth, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "@/lib/firebase";
+import { createTrade, updateTrade, getTrade } from "@/lib/firestore";
+import { uploadToCloudinary } from "@/services/cloudinary";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Loader2, Plus, X, Upload, Trash2, Star, Image as ImageIcon, GripVertical } from "lucide-react";
 import type { Trade, Market, Direction, Session, TradePsychology, TradeChecklistItem, TradeScreenshot } from "@/types/trade";
-import { useEffect } from "react";
 
 const MARKETS: Market[] = ["Forex", "Crypto", "Stocks", "Futures", "Options"];
 const DIRECTIONS: Direction[] = ["Buy", "Sell"];
@@ -25,7 +25,7 @@ const TIMEFRAMES = ["1M", "5M", "15M", "30M", "1H", "4H", "D", "W", "MN"];
 const CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF"];
 const EMOTIONS = ["Neutral", "Confident", "Nervous", "Excited", "Fearful", "Greedy", "Impatient", "Disciplined", "Revengeful", "FOMO"];
 
-const DEFAULT_CHECKLIST = [
+const DEFAULT_CHECKLIST: TradeChecklistItem[] = [
   { id: "1", label: "Waited for confirmation", checked: false },
   { id: "2", label: "Risk below limit", checked: false },
   { id: "3", label: "Trend followed", checked: false },
@@ -38,13 +38,13 @@ const DEFAULT_TAGS = ["Scalp", "Swing", "Breakout", "Reversal", "Liquidity", "Lo
 export default function AddTrade() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const isEditing = !!id;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
 
-  // Form state
   const [pair, setPair] = useState("");
   const [market, setMarket] = useState<Market>("Forex");
   const [direction, setDirection] = useState<Direction>("Buy");
@@ -68,8 +68,10 @@ export default function AddTrade() {
   const [exitTime, setExitTime] = useState("");
   const [session, setSession] = useState<Session>("London");
   const [notes, setNotes] = useState("");
-  const [status, setStatus] = useState<Trade["status"]>("closed");
+  const [status, setStatus] = useState<Trade["status"]>("breakeven");
   const [isFavorite, setIsFavorite] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
+  const [isArchived, setIsArchived] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [screenshots, setScreenshots] = useState<TradeScreenshot[]>([]);
@@ -81,11 +83,10 @@ export default function AddTrade() {
     after: { emotion: "Neutral", mistakes: "", lessonsLearned: "" },
   });
 
-  // Load trade for editing
   useEffect(() => {
-    if (!id) return;
+    if (!id || !user?.uid) return;
     setLoading(true);
-    getTrade(id).then((trade) => {
+    getTrade(user.uid, id).then((trade) => {
       if (trade) {
         setPair(trade.pair);
         setMarket(trade.market);
@@ -112,14 +113,16 @@ export default function AddTrade() {
         setNotes(trade.notes);
         setStatus(trade.status);
         setIsFavorite(trade.isFavorite);
+        setIsPinned(trade.isPinned);
+        setIsArchived(trade.isArchived);
         setTags(trade.tags);
-        setScreenshots(trade.screenshots);
+        setScreenshots(trade.screenshots || []);
         setChecklist(trade.checklist.length > 0 ? trade.checklist : DEFAULT_CHECKLIST);
         if (trade.psychology) setPsychology(trade.psychology);
       }
       setLoading(false);
     });
-  }, [id]);
+  }, [id, user?.uid]);
 
   const handleAddTag = () => {
     if (tagInput.trim() && !tags.includes(tagInput.trim())) {
@@ -158,42 +161,49 @@ export default function AddTrade() {
     handleUploadFiles(files);
   };
 
-  const handleUploadFiles = (files: File[]) => {
+  const handleUploadFiles = async (files: File[]) => {
+    if (!user?.uid) {
+      toast.error("You must be logged in to upload screenshots");
+      return;
+    }
+
     for (const file of files) {
       const uploadId = Date.now().toString() + Math.random().toString(36).slice(2);
       setUploadProgress((prev) => ({ ...prev, [uploadId]: 0 }));
 
-      const storageRef = ref(storage, `trades/${auth.currentUser?.uid}/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, file);
+      try {
+        const result = await uploadToCloudinary(
+          file,
+          ({ progress }) => {
+            setUploadProgress((prev) => ({ ...prev, [uploadId]: progress }));
+          }
+        );
 
-      uploadTask.on(
-        "state_changed",
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress((prev) => ({ ...prev, [uploadId]: progress }));
-        },
-        (error) => {
-          console.error("Upload error:", error);
-          toast.error(`Failed to upload ${file.name}`);
-          setUploadProgress((prev) => { const n = { ...prev }; delete n[uploadId]; return n; });
-        },
-        async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          setScreenshots((prev) => [...prev, { id: uploadId, url, name: file.name, uploadedAt: new Date().toISOString() }]);
-          setUploadProgress((prev) => { const n = { ...prev }; delete n[uploadId]; return n; });
-          toast.success(`${file.name} uploaded`);
-        }
-      );
+        setScreenshots((prev) => [
+          ...prev,
+          {
+            id: uploadId,
+            url: result.secure_url,
+            name: file.name,
+            uploadedAt: new Date().toISOString(),
+          },
+        ]);
+        toast.success(`${file.name} uploaded`);
+      } catch (error: unknown) {
+        const err = error as { message?: string };
+        console.error("Upload error:", err);
+        toast.error(err.message || `Failed to upload ${file.name}`);
+      } finally {
+        setUploadProgress((prev) => {
+          const n = { ...prev };
+          delete n[uploadId];
+          return n;
+        });
+      }
     }
   };
 
   const handleDeleteScreenshot = async (screenshot: TradeScreenshot) => {
-    try {
-      const storageRef = ref(storage, screenshot.url);
-      await deleteObject(storageRef);
-    } catch {
-      // URL might be invalid for deletion, just remove from state
-    }
     setScreenshots(screenshots.filter((s) => s.id !== screenshot.id));
     toast.success("Screenshot removed");
   };
@@ -209,6 +219,10 @@ export default function AddTrade() {
   };
 
   const handleSubmit = async () => {
+    if (!user?.uid) {
+      toast.error("You must be logged in");
+      return;
+    }
     if (!pair.trim()) { toast.error("Trading pair is required"); return; }
     if (!entryPrice) { toast.error("Entry price is required"); return; }
     if (!positionSize) { toast.error("Position size is required"); return; }
@@ -243,8 +257,8 @@ export default function AddTrade() {
         session,
         status,
         isFavorite,
-        isPinned: false,
-        isArchived: false,
+        isPinned,
+        isArchived,
         tags,
         psychology,
         checklist,
@@ -253,11 +267,11 @@ export default function AddTrade() {
       };
 
       if (isEditing && id) {
-        await updateTrade(id, tradeData);
+        await updateTrade(user.uid, id, tradeData);
         toast.success("Trade updated successfully");
         navigate(`/trades/${id}`);
       } else {
-        const newTrade = await createTrade(tradeData);
+        const newTrade = await createTrade(user.uid, tradeData);
         toast.success("Trade created successfully");
         navigate(`/trades/${newTrade.id}`);
       }
@@ -311,7 +325,6 @@ export default function AddTrade() {
           </TabsList>
 
           <TabsContent value="details" className="space-y-4">
-            {/* Basic Info */}
             <Card>
               <CardHeader><CardTitle>Basic Information</CardTitle></CardHeader>
               <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -366,7 +379,6 @@ export default function AddTrade() {
               </CardContent>
             </Card>
 
-            {/* Prices */}
             <Card>
               <CardHeader><CardTitle>Price Levels</CardTitle></CardHeader>
               <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -397,7 +409,6 @@ export default function AddTrade() {
               </CardContent>
             </Card>
 
-            {/* P&L */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Profit / Loss</CardTitle>
@@ -426,7 +437,6 @@ export default function AddTrade() {
               </CardContent>
             </Card>
 
-            {/* Timing */}
             <Card>
               <CardHeader><CardTitle>Timing</CardTitle></CardHeader>
               <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -450,23 +460,19 @@ export default function AddTrade() {
                       <SelectItem value="open">Open</SelectItem>
                       <SelectItem value="closed">Closed</SelectItem>
                       <SelectItem value="breakeven">Breakeven</SelectItem>
+                      <SelectItem value="win">Win</SelectItem>
+                      <SelectItem value="loss">Loss</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Tags */}
             <Card>
               <CardHeader><CardTitle>Tags</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
-                  <Input
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
-                    placeholder="Add a tag..."
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTag())}
-                  />
+                  <Input value={tagInput} onChange={(e) => setTagInput(e.target.value)} placeholder="Add a tag..." onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTag())} />
                   <Button type="button" onClick={handleAddTag} size="icon"><Plus className="h-4 w-4" /></Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -542,11 +548,11 @@ export default function AddTrade() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mistakes">Mistakes Made</Label>
-                  <Textarea id="mistakes" value={psychology.after.mistakes} onChange={(e) => setPsychology({ ...psychology, after: { ...psychology.after, mistakes: e.target.value } })} placeholder="What went wrong?" rows={3} />
+                  <Textarea id="mistakes" value={psychology.after.mistakes} onChange={(e) => setPsychology({ ...psychology, after: { ...psychology.after, mistakes: e.target.value }})} placeholder="What went wrong?" rows={3} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="lessons">Lessons Learned</Label>
-                  <Textarea id="lessons" value={psychology.after.lessonsLearned} onChange={(e) => setPsychology({ ...psychology, after: { ...psychology.after, lessonsLearned: e.target.value } })} placeholder="What did you learn?" rows={3} />
+                  <Textarea id="lessons" value={psychology.after.lessonsLearned} onChange={(e) => setPsychology({ ...psychology, after: { ...psychology.after, lessonsLearned: e.target.value }})} placeholder="What did you learn?" rows={3} />
                 </div>
               </CardContent>
             </Card>
@@ -581,7 +587,7 @@ export default function AddTrade() {
             <Card>
               <CardHeader>
                 <CardTitle>Trade Screenshots</CardTitle>
-                <CardDescription>Upload chart screenshots for this trade</CardDescription>
+                <CardDescription>Upload chart screenshots for this trade (Cloudinary)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div
@@ -591,12 +597,11 @@ export default function AddTrade() {
                   onDragOver={(e) => e.preventDefault()}
                 >
                   <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm font-medium">Click or drag & drop to upload</p>
+                  <p className="text-sm font-medium">Click or drag &amp; drop to upload</p>
                   <p className="text-xs text-muted-foreground">PNG, JPG, GIF up to 10MB</p>
                   <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
                 </div>
 
-                {/* Upload progress */}
                 {Object.entries(uploadProgress).map(([id, progress]) => (
                   <div key={id} className="flex items-center gap-3 p-3 rounded-lg bg-muted">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -605,7 +610,6 @@ export default function AddTrade() {
                   </div>
                 ))}
 
-                {/* Screenshots grid */}
                 {screenshots.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                     {screenshots.map((screenshot) => (
@@ -627,7 +631,7 @@ export default function AddTrade() {
             <Card>
               <CardHeader><CardTitle>Journal Notes</CardTitle><CardDescription>Additional notes about this trade</CardDescription></CardHeader>
               <CardContent>
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Write your trade notes here... Use **bold**, *italic*, or create lists." rows={12} className="font-mono text-sm" />
+                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Write your trade notes here..." rows={12} className="font-mono text-sm" />
               </CardContent>
             </Card>
           </TabsContent>

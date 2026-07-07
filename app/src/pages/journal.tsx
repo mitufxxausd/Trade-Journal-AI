@@ -1,164 +1,180 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import AppLayout from "@/components/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { db, query, collection, where, orderBy, getDocs, auth } from "@/lib/firebase";
-import type { Trade } from "@/types/trade";
-import { Search, BookOpen, FileText, ArrowRight, Calendar, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+import { BookOpen, Save, Plus } from "lucide-react";
+
+interface JournalEntry {
+  id: string;
+  title: string;
+  content: string;
+  date: string;
+  tags: string[];
+}
 
 export default function Journal() {
   const navigate = useNavigate();
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  const fetchTrades = useCallback(async () => {
+  const [entries, setEntries] = useState<JournalEntry[]>(() => {
     try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) return;
-      const q = query(
-        collection(db, "trades"),
-        where("userId", "==", currentUser.uid),
-        orderBy("tradeDate", "desc")
-      );
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Trade));
-      setTrades(data);
+      const stored = localStorage.getItem("trade_journal_entries");
+      return stored ? JSON.parse(stored) : [];
     } catch {
-      // Silently handle
-    } finally {
-      setLoading(false);
+      return [];
     }
-  }, []);
-
-  useEffect(() => {
-    fetchTrades();
-  }, [fetchTrades]);
-
-  const tradesWithNotes = trades.filter((t) => t.notes.trim().length > 0);
-
-  const filteredTrades = tradesWithNotes.filter((t) => {
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return t.notes.toLowerCase().includes(s) || t.pair.toLowerCase().includes(s) || t.strategy.toLowerCase().includes(s);
   });
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Group by month
-  const grouped = filteredTrades.reduce<Record<string, Trade[]>>((acc, trade) => {
-    const month = trade.tradeDate.substring(0, 7);
-    if (!acc[month]) acc[month] = [];
-    acc[month].push(trade);
-    return acc;
-  }, {});
+  const saveEntries = (newEntries: JournalEntry[]) => {
+    setEntries(newEntries);
+    localStorage.setItem("trade_journal_entries", JSON.stringify(newEntries));
+  };
 
-  const monthNames: Record<string, string> = {};
-  for (const key of Object.keys(grouped)) {
-    const [year, month] = key.split("-");
-    monthNames[key] = new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  }
+  const handleSave = () => {
+    if (!title.trim() && !content.trim()) {
+      toast.error("Please enter a title or content");
+      return;
+    }
+    if (editingId) {
+      const updated = entries.map((e) =>
+        e.id === editingId
+          ? { ...e, title: title || e.title, content, date: new Date().toISOString() }
+          : e
+      );
+      saveEntries(updated);
+      toast.success("Entry updated");
+    } else {
+      const newEntry: JournalEntry = {
+        id: Date.now().toString(),
+        title: title || "Untitled Entry",
+        content,
+        date: new Date().toISOString(),
+        tags: [],
+      };
+      saveEntries([newEntry, ...entries]);
+      toast.success("Entry saved");
+    }
+    setTitle("");
+    setContent("");
+    setEditingId(null);
+  };
+
+  const handleEdit = (entry: JournalEntry) => {
+    setTitle(entry.title);
+    setContent(entry.content);
+    setEditingId(entry.id);
+  };
+
+  const handleDelete = (id: string) => {
+    if (!confirm("Delete this entry?")) return;
+    saveEntries(entries.filter((e) => e.id !== id));
+    if (editingId === id) {
+      setTitle("");
+      setContent("");
+      setEditingId(null);
+    }
+    toast.success("Entry deleted");
+  };
+
+  const handleNew = () => {
+    setTitle("");
+    setContent("");
+    setEditingId(null);
+  };
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <BookOpen className="h-6 w-6" />
-            Trading Journal
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            {tradesWithNotes.length} entries with journal notes
-          </p>
-        </div>
-
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search journal entries..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-
-        {loading ? (
-          <div className="space-y-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Card key={i}><CardContent className="p-6"><div className="h-4 w-32 bg-muted rounded mb-2" /><div className="h-20 bg-muted rounded" /></CardContent></Card>
-            ))}
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Trading Journal</h1>
+            <p className="text-muted-foreground">Document your trading journey</p>
           </div>
-        ) : filteredTrades.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">No journal entries yet</p>
-              <p className="text-sm text-muted-foreground mb-4">
-                Start adding notes to your trades to build your trading journal
-              </p>
-              <Button onClick={() => navigate("/trades/new")}>
-                <TrendingUp className="mr-2 h-4 w-4" />
-                Add a Trade with Notes
-              </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleNew}>
+              <Plus className="mr-2 h-4 w-4" /> New Entry
+            </Button>
+            <Button onClick={handleSave}>
+              <Save className="mr-2 h-4 w-4" /> Save
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>{editingId ? "Edit Entry" : "New Entry"}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input
+                placeholder="Entry title..."
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              <Textarea
+                placeholder="Write your journal entry here..."
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={16}
+                className="font-mono text-sm resize-none"
+              />
             </CardContent>
           </Card>
-        ) : (
-          Object.entries(grouped)
-            .sort(([a], [b]) => b.localeCompare(a))
-            .map(([month, monthTrades]) => (
-              <div key={month} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="font-semibold text-lg">{monthNames[month]}</h2>
-                  <Badge variant="secondary">{monthTrades.length} entries</Badge>
-                </div>
-                {monthTrades.map((trade) => (
+
+          <div className="space-y-4">
+            <h3 className="font-semibold">Recent Entries</h3>
+            {entries.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <BookOpen className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                <p>No entries yet</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {entries.map((entry) => (
                   <Card
-                    key={trade.id}
-                    className="hover:shadow-md transition-all cursor-pointer"
-                    onClick={() => navigate(`/trades/${trade.id}`)}
+                    key={entry.id}
+                    className={`cursor-pointer hover:shadow-md transition-all ${
+                      editingId === entry.id ? "border-primary" : ""
+                    }`}
+                    onClick={() => handleEdit(entry)}
                   >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <CardTitle className="text-base">{trade.pair} ({trade.direction})</CardTitle>
-                          <Badge variant="outline" className="text-xs">{trade.market}</Badge>
-                          <Badge variant="secondary" className="text-xs">{trade.strategy}</Badge>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">{entry.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(entry.date).toLocaleDateString()}
+                          </p>
                         </div>
-                        <span className="text-xs text-muted-foreground">{trade.tradeDate}</span>
-                      </div>
-                      <CardDescription>
-                        P&L: <span className={(trade.profitLoss || 0) > 0 ? "text-green-600 font-medium" : (trade.profitLoss || 0) < 0 ? "text-red-600 font-medium" : ""}>
-                          {(trade.profitLoss || 0) > 0 ? "+" : ""}${(trade.profitLoss || 0).toFixed(2)}
-                        </span>
-                        {trade.rrRatio ? ` • R:R ${trade.rrRatio.toFixed(1)}` : ""}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <p className="text-sm text-muted-foreground line-clamp-4 whitespace-pre-wrap">
-                          {trade.notes}
-                        </p>
-                      </div>
-                      {trade.tags.length > 0 && (
-                        <div className="flex gap-1 mt-3 flex-wrap">
-                          {trade.tags.map((tag) => (
-                            <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex justify-end mt-3">
-                        <Button variant="ghost" size="sm" className="text-xs">
-                          Read More <ArrowRight className="ml-1 h-3 w-3" />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0 text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(entry.id);
+                          }}
+                        >
+                          Delete
                         </Button>
                       </div>
+                      {entry.content && (
+                        <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
+                          {entry.content}
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
               </div>
-            ))
-        )}
+            )}
+          </div>
+        </div>
       </div>
     </AppLayout>
   );
