@@ -3,18 +3,16 @@ import { Link, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth, signInWithEmailAndPassword, signInWithPopup, googleProvider } from "@/lib/firebase";
 import { toast } from "sonner";
-import { Loader2, TrendingUp, Chrome } from "lucide-react";
+import { Loader2, TrendingUp, Mail } from "lucide-react";
 
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,36 +23,27 @@ export default function Login() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      toast.success("Welcome back!");
+      toast.success("Logged in successfully");
       navigate("/dashboard");
     } catch (error: unknown) {
-      const err = error as { code?: string; message?: string };
-      if (err.code === "auth/invalid-credential") {
-        toast.error("Invalid email or password");
-      } else if (err.code === "auth/user-not-found") {
-        toast.error("No account found with this email");
-      } else if (err.code === "auth/wrong-password") {
-        toast.error("Incorrect password");
-      } else {
-        toast.error(err.message || "Login failed");
-      }
+      const err = error as { message?: string };
+      toast.error(err.message || "Failed to login");
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
+    setLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
-      toast.success("Welcome!");
+      toast.success("Logged in with Google");
       navigate("/dashboard");
     } catch (error: unknown) {
-      const err = error as { code?: string; message?: string };
-      if (err.code === "auth/popup-closed-by-user") return;
-      toast.error(err.message || "Google login failed");
+      const err = error as { message?: string };
+      toast.error(err.message || "Failed to login with Google");
     } finally {
-      setGoogleLoading(false);
+      setLoading(false);
     }
   };
 
@@ -74,79 +63,40 @@ export default function Login() {
         <Card className="border shadow-xl">
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl">Welcome back</CardTitle>
-            <CardDescription>Sign in to your account</CardDescription>
+            <CardDescription>Sign in to your account to continue</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <Button variant="outline" className="w-full" onClick={handleGoogleLogin} disabled={loading}>
+              <Mail className="mr-2 h-4 w-4" /> Continue with Google
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+              <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">Or continue with email</span></div>
+            </div>
+
             <form onSubmit={handleEmailLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={loading}
-                />
+                <Input id="email" type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loading} />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  <Link to="/forgot-password" className="text-xs text-primary hover:underline">
-                    Forgot password?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={loading}
-                />
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={loading} />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : null}
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Sign In
               </Button>
             </form>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <Separator className="w-full" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">or continue with</span>
-              </div>
+            <div className="text-center text-sm">
+              <Link to="/forgot-password" className="text-primary hover:underline">Forgot password?</Link>
             </div>
-
-            <Button
-              variant="outline"
-              type="button"
-              className="w-full"
-              onClick={handleGoogleLogin}
-              disabled={googleLoading}
-            >
-              {googleLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Chrome className="mr-2 h-4 w-4" />
-              )}
-              Google
-            </Button>
+            <div className="text-center text-sm text-muted-foreground">
+              Don't have an account? <Link to="/register" className="text-primary hover:underline">Sign up</Link>
+            </div>
           </CardContent>
-          <CardFooter className="flex justify-center">
-            <p className="text-sm text-muted-foreground">
-              Don't have an account?{" "}
-              <Link to="/register" className="font-medium text-primary hover:underline">
-                Sign up
-              </Link>
-            </p>
-          </CardFooter>
         </Card>
       </div>
     </div>
