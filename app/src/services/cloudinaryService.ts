@@ -241,12 +241,19 @@ export function uploadToCloudinary(
 /**
  * Upload a single image with compression and validation.
  * Returns a TradeScreenshot-compatible object.
+ * 
+ * @param userId - The user's UID
+ * @param tradeId - The trade ID (or "temp" for new trades)
+ * @param file - The image file to upload
+ * @param onProgress - Optional progress callback
+ * @param screenshotId - Optional external ID to use for progress tracking (if not provided, one is generated)
  */
 export async function uploadScreenshot(
   userId: string,
   tradeId: string,
   file: File,
-  onProgress?: (event: UploadProgressEvent) => void
+  onProgress?: (event: UploadProgressEvent) => void,
+  screenshotId?: string
 ): Promise<TradeScreenshot> {
   // Validate
   const validation = validateImageFile(file);
@@ -254,13 +261,13 @@ export async function uploadScreenshot(
     throw new Error(validation.error);
   }
 
-  const screenshotId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const id = screenshotId ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   // Report initial progress
-  onProgress?.({ screenshotId, progress: 0, status: "uploading" });
+  onProgress?.({ screenshotId: id, progress: 0, status: "uploading" });
 
   // Compress
-  onProgress?.({ screenshotId, progress: 5, status: "uploading" });
+  onProgress?.({ screenshotId: id, progress: 5, status: "uploading" });
   const compressed = await compressImage(file);
 
   // Upload to Cloudinary
@@ -270,7 +277,7 @@ export async function uploadScreenshot(
     (progress) => {
       // Map 0-100 to 10-95 range (reserve 0-5 for compression, 95-100 for processing)
       const mappedProgress = 10 + Math.round(progress * 0.85);
-      onProgress?.({ screenshotId, progress: mappedProgress, status: "uploading" });
+      onProgress?.({ screenshotId: id, progress: mappedProgress, status: "uploading" });
     },
     {
       folder: `trade-journal/${userId}`,
@@ -278,10 +285,10 @@ export async function uploadScreenshot(
     }
   );
 
-  onProgress?.({ screenshotId, progress: 100, status: "complete" });
+  onProgress?.({ screenshotId: id, progress: 100, status: "complete" });
 
   return {
-    id: screenshotId,
+    id,
     url: result.secure_url,
     name: file.name,
     uploadedAt: new Date().toISOString(),
@@ -367,7 +374,7 @@ export function extractPublicId(url: string): string | null {
  */
 export function getResponsiveUrl(
   url: string,
-  options: { width?: number; height?: number; quality?: number; format?: string } = {}
+  options: { width?: number; height?: number; quality?: number | string; format?: string } = {}
 ): string {
   if (!url.includes("cloudinary.com")) return url;
 
