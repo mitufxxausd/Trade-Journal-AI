@@ -1,18 +1,6 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  type ReactNode,
-} from "react";
-import {
-  auth,
-  onAuthStateChanged,
-  signOut as firebaseSignOut,
-  type FirebaseUser,
-} from "@/lib/firebase";
-import { doc, getDoc, setDoc, db } from "@/lib/firebase";
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { auth, onAuthStateChanged, signOut as firebaseSignOut, type FirebaseUser } from "@/lib/firebase";
+import { doc, getDoc, setDoc, db } from "@/lib/firestore";
 
 export interface UserProfile {
   uid: string;
@@ -109,16 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, fetchUserProfile]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        userProfile,
-        loading,
-        isAuthenticated: !!user,
-        logout,
-        refreshUserProfile,
-      }}
-    >
+    <AuthContext.Provider value={{ user, userProfile, loading, isAuthenticated: !!user, logout, refreshUserProfile }}>
       {children}
     </AuthContext.Provider>
   );
